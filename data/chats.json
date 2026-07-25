@@ -1,0 +1,20 @@
+{
+  "conversations": {
+    "be9fd35a-5998-462e-ac85-07d347f8b88b": {
+      "id": "be9fd35a-5998-462e-ac85-07d347f8b88b",
+      "name": "Клиент",
+      "createdAt": "2026-07-25T17:56:20.843Z",
+      "updatedAt": "2026-07-25T17:56:20.843Z",
+      "messages": [
+        {
+          "id": "450e5348-d73a-4065-b7a2-b508b9ac1d92",
+          "role": "manager",
+          "author": "Поддержка Miracle Boost",
+          "text": "Здравствуйте! Это поддержка Miracle Boost. Напишите ваш вопрос — поможем с расчётом, оформлением или сделкой через FunPay.",
+          "createdAt": "2026-07-25T17:56:20.843Z"
+        }
+      ]
+    }
+  },
+  "orders": {}
+}

@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Miracle Boost — буст FACEIT с онлайн-калькулятором стоимости, оформлением заказа через Telegram и отзывами на FunPay."
+    />
+    <meta name="theme-color" content="#910029" data-theme-color />
+    <meta property="og:title" content="Miracle Boost — буст FACEIT" />
+    <meta property="og:description" content="Рассчитайте стоимость буста по ELO и отправьте готовый заказ менеджеру." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="./public/og-cover.svg" />
+    <link rel="icon" href="./public/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./public/site.webmanifest" />
+    <script>
+      (() => {
+        try {
+          const savedTheme = localStorage.getItem('miracle-boost-theme');
+          const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.dataset.theme = savedTheme || systemTheme;
+        } catch {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <title>Miracle Boost — буст FACEIT</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#calculator">Перейти к калькулятору</a>
+
+    <header class="header" data-header>
+      <div class="container header__inner">
+        <a class="brand" href="#top" aria-label="Miracle Boost — на главную">
+          <span class="brand__logo" aria-hidden="true">M</span>
+          <span class="brand__copy">
+            <strong>miracle</strong>
+            <small>boost</small>
+          </span>
+        </a>
+
+        <div class="header__controls">
+          <button class="theme-toggle" type="button" data-theme-toggle aria-label="Переключить тему" aria-pressed="false">
+            <span class="theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true">☀</span>
+            <span class="theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true">☾</span>
+            <span data-theme-label>Светлая</span>
+          </button>
+
+          <button
+            class="menu-toggle"
+            type="button"
+            aria-label="Открыть меню"
+            aria-expanded="false"
+            aria-controls="site-nav"
+            data-menu-toggle
+          >
+            <span></span><span></span>
+          </button>
+        </div>
+
+        <nav class="nav" id="site-nav" aria-label="Основная навигация" data-nav>
+          <a href="#calculator">Калькулятор</a>
+          <a href="#benefits">Преимущества</a>
+          <a href="#reviews">Отзывы</a>
+          <a class="nav__cta" href="https://t.me/miraclemanagers" target="_blank" rel="noopener noreferrer">Связаться</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero section">
+        <div class="hero__glow hero__glow--one" aria-hidden="true"></div>
+        <div class="hero__glow hero__glow--two" aria-hidden="true"></div>
+
+        <div class="container hero__grid">
+          <div class="hero__content reveal">
+            <h1>Miracle Boost.<br /><em>Буст FACEIT без лишнего.</em></h1>
+            <div class="hero__actions">
+              <a class="button button--primary" href="#calculator">Рассчитать цену</a>
+              <a class="button button--secondary" href="https://funpay.com/users/5223982/" target="_blank" rel="noopener noreferrer">Отзывы на FunPay</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="calculator-section section" id="calculator">
+        <div class="container">
+          <div class="section-heading section-heading--compact reveal">
+            <div>
+              <span class="kicker">КАЛЬКУЛЯТОР</span>
+              <h2>Цена по вашему диапазону ELO</h2>
+            </div>
+          </div>
+
+          <div class="calculator-layout reveal">
+            <section class="calculator-card" aria-labelledby="calculator-title">
+              <div class="calculator-card__header">
+                <div>
+                  <span class="status-dot"></span>
+                  <span>Онлайн-расчёт</span>
+                </div>
+                <span id="calculator-title">Настройте заказ</span>
+              </div>
+
+              <div class="elo-pair">
+                <label class="field">
+                  <span class="field__label">Текущее ELO</span>
+                  <span class="field__control">
+                    <input id="current-elo" type="number" min="100" max="2000" step="1" value="500" inputmode="numeric" autocomplete="off" />
+                    <small>ELO</small>
+                  </span>
+                  <span class="field__hint">Минимум 100</span>
+                </label>
+
+                <span class="elo-pair__arrow" aria-hidden="true">→</span>
+
+                <label class="field">
+                  <span class="field__label">Желаемое ELO</span>
+                  <span class="field__control">
+                    <input id="target-elo" type="number" min="101" max="2001" step="1" value="1500" inputmode="numeric" autocomplete="off" />
+                    <small>ELO</small>
+                  </span>
+                  <span class="field__hint">Максимум 2001</span>
+                </label>
+              </div>
+
+              <div class="range-wrap">
+                <div class="range-wrap__top">
+                  <label for="target-range">Быстрый выбор цели</label>
+                  <output id="target-output" for="target-range">1500 ELO</output>
+                </div>
+                <input id="target-range" class="range" type="range" min="101" max="2001" step="1" value="1500" />
+                <div class="range-labels" aria-hidden="true"><span>100</span><span>1500</span><span>2001</span></div>
+              </div>
+
+              <fieldset class="addons">
+                <legend>Дополнительные условия</legend>
+                <p>Наценки суммируются от базовой стоимости.</p>
+
+                <div class="addons__grid">
+                  <label class="addon">
+                    <input type="checkbox" value="0.50" data-option="Без передачи" />
+                    <span class="addon__box" aria-hidden="true"></span>
+                    <span class="addon__copy">
+                      <strong>Без передачи</strong>
+                      <small>Буст без передачи аккаунта, игра идёт вместе с вами</small>
+                    </span>
+                    <b>+50%</b>
+                  </label>
+
+                  <label class="addon">
+                    <input type="checkbox" value="0.35" data-option="Приоритет" />
+                    <span class="addon__box" aria-hidden="true"></span>
+                    <span class="addon__copy">
+                      <strong>Приоритет</strong>
+                      <small>Ваш заказ получает повышенный приоритет в очереди</small>
+                    </span>
+                    <b>+35%</b>
+                  </label>
+
+                  <label class="addon">
+                    <input type="checkbox" value="0.20" data-option="Экспресс" />
+                    <span class="addon__box" aria-hidden="true"></span>
+                    <span class="addon__copy">
+                      <strong>Экспресс</strong>
+                      <small>Максимально быстрый темп выполнения заказа</small>
+                    </span>
+                    <b>+20%</b>
+                  </label>
+
+                  <label class="addon">
+                    <input type="checkbox" value="0.25" data-option="Премиум" />
+                    <span class="addon__box" aria-hidden="true"></span>
+                    <span class="addon__copy">
+                      <strong>Премиум</strong>
+                      <small>На аккаунте должен быть FACEIT Premium, матчи играются только в Premium queue</small>
+                    </span>
+                    <b>+25%</b>
+                  </label>
+                </div>
+              </fieldset>
+
+              <p class="validation" id="validation-message" role="alert" aria-live="polite"></p>
+            </section>
+
+            <aside class="summary" aria-labelledby="summary-title">
+              <div class="summary__eyebrow">ВАШ РАСЧЁТ</div>
+              <h3 id="summary-title">Итоговая стоимость</h3>
+              <div class="summary__price"><span id="total-price">3 000</span><small>₽</small></div>
+              <p class="summary__caption">Полный маршрут 100 → 2001 ELO считается как 8 750 ₽. Наценки добавляются сверху.</p>
+
+              <div class="summary__progress" aria-hidden="true">
+                <span data-progress></span>
+              </div>
+
+              <dl class="breakdown">
+                <div><dt>Объём буста</dt><dd><span id="elo-difference">1000</span> ELO</dd></div>
+                <div><dt>Шагов по 25 ELO</dt><dd id="steps-line">40</dd></div>
+                <div><dt>Базовая цена</dt><dd id="base-line">3 000 ₽</dd></div>
+                <div><dt>Наценки</dt><dd id="markup-line">0 ₽</dd></div>
+                <div><dt>Цена сайта</dt><dd id="site-total-line">3 000 ₽</dd></div>
+                <div><dt>FunPay +5%</dt><dd id="funpay-line">не выбрано</dd></div>
+              </dl>
+
+              <div class="safe-deal">
+                <strong>Не хотите оформлять через сайт?</strong>
+                <span>Нажмите кнопку ниже, чтобы добавить к расчёту наценку FunPay +5% и провести сделку через FunPay.</span>
+                <button class="safe-deal__toggle" id="funpay-toggle" type="button" data-active="false" aria-pressed="false">Добавить FunPay +5%</button>
+              </div>
+
+              <div class="summary__actions">
+                <button class="button button--light button--full" id="order-open" type="button">Оформить заказ</button>
+                <a class="button button--soft button--full" id="funpay-order" href="https://funpay.com/users/5223982/" target="_blank" rel="noopener noreferrer">Перейти на FunPay</a>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="process section" id="process">
+        <div class="container">
+          <div class="section-heading section-heading--compact reveal">
+            <div>
+              <span class="kicker">ПРОЦЕСС</span>
+              <h2>От расчёта до старта</h2>
+            </div>
+          </div>
+
+          <ol class="steps">
+            <li class="step reveal">
+              <span>01</span>
+              <div><h3>Рассчитайте стоимость</h3><p>Укажите текущее и желаемое ELO, выберите условия и сразу увидьте итоговую цену.</p></div>
+            </li>
+            <li class="step reveal reveal--delay-1">
+              <span>02</span>
+              <div><h3>Заполните данные для связи и оплатите заказ</h3><p>Оставьте Telegram и почту, после чего менеджер подтвердит способ оплаты.</p></div>
+            </li>
+            <li class="step reveal reveal--delay-2">
+              <span>03</span>
+              <div><h3>Статус заказа можно будет узнать в поддержке по его номеру</h3><p>Назовите номер заказа в чате поддержки — менеджер сообщит текущий этап.</p></div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="benefits section" id="benefits">
+        <div class="container">
+          <div class="benefits__header reveal">
+            <span class="kicker kicker--light">ПРЕИМУЩЕСТВА</span>
+            <h2>Сильные стороны Miracle Boost</h2>
+            <p>То, за что нас выбирают клиенты.</p>
+          </div>
+
+          <div class="benefits__grid">
+            <article class="benefit-card reveal">
+              <div class="benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6l7-3z" />
+                </svg>
+              </div>
+              <h3>Безопасность</h3>
+              <p>
+                Аккуратно подходим к каждому заказу, заранее согласовываем формат игры и не просим лишних данных. Если нужен буст
+                без передачи, играем вместе с вами.
+              </p>
+            </article>
+
+            <article class="benefit-card reveal reveal--delay-1">
+              <div class="benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8A8.5 8.5 0 0 1 12.5 20 8.38 8.38 0 0 1 8.7 19.1L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3a8.5 8.5 0 0 1 8.5 8.5z" />
+                </svg>
+              </div>
+              <h3>Коммуникация</h3>
+              <p>
+                Всегда остаёмся на связи в Telegram, быстро отвечаем по заказу и держим вас в курсе прогресса. Заявка оформляется
+                в один клик через готовое сообщение.
+              </p>
+            </article>
+
+            <article class="benefit-card reveal reveal--delay-2">
+              <div class="benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M3 3l18 18" />
+                </svg>
+              </div>
+              <h3>Приватность</h3>
+              <p>
+                Детали заказа обсуждаются только с вами. При выборе опции «Премиум» на аккаунте должен быть FACEIT Premium, а все
+                матчи играются только в Premium queue.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="reviews section" id="reviews">
+        <div class="container reviews__grid">
+          <div class="reviews__content reveal">
+            <span class="kicker">ОТЗЫВЫ</span>
+            <h2>Отзывы и репутация</h2>
+            <p>
+              Если вам спокойнее проводить сделку через площадку, можно перейти на FunPay. Там оформление идёт с наценкой <strong>+5%</strong> к цене сайта.
+            </p>
+            <a class="button button--primary" href="https://funpay.com/users/5223982/" target="_blank" rel="noopener noreferrer">Перейти на FunPay</a>
+          </div>
+
+          <a class="review-panel reveal reveal--delay-1" href="https://funpay.com/users/5223982/" target="_blank" rel="noopener noreferrer" aria-label="Открыть отзывы Miracle Boost на FunPay">
+            <div class="review-panel__top">
+              <span class="review-panel__logo">F</span>
+              <span>FUNPAY PROFILE</span>
+              <b>↗</b>
+            </div>
+            <div class="review-panel__stars" aria-label="Отзывы доступны на FunPay">★★★★★</div>
+            <blockquote>Откройте профиль, чтобы посмотреть отзывы и оформить заказ через FunPay с наценкой +5% к цене сайта.</blockquote>
+            <span class="review-panel__link">Отзывы и безопасная сделка через FunPay</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <a class="brand brand--footer" href="#top">
+          <span class="brand__logo" aria-hidden="true">M</span>
+          <span class="brand__copy"><strong>miracle</strong><small>boost</small></span>
+        </a>
+        <div class="footer__links">
+          <a href="https://t.me/miraclemanagers" target="_blank" rel="noopener noreferrer">Telegram</a>
+          <a href="mailto:miracleboostmanager@gmail.com">Email</a>
+          <a href="https://funpay.com/users/5223982/" target="_blank" rel="noopener noreferrer">FunPay</a>
+        </div>
+      </div>
+    </footer>
+
+    <div class="order-modal" data-order-modal hidden><div class="order-modal__backdrop" data-order-close></div><section class="order-modal__card" role="dialog" aria-modal="true" aria-labelledby="order-modal-title"><button class="order-modal__close" type="button" data-order-close aria-label="Закрыть окно">×</button><span class="kicker">ЗАКАЗ</span><h2 id="order-modal-title">Оформить заказ</h2><p>Оставьте Telegram и почту — заказ сразу появится в админ-панели.</p><form class="order-form" data-order-form><label><span>Ваш Telegram</span><input type="text" name="telegram" placeholder="@username" required data-order-telegram /></label><label><span>Ваша почта</span><input type="email" name="email" placeholder="you@example.com" required data-order-email /></label><label><span>Комментарий</span><textarea name="comment" rows="3" maxlength="800" placeholder="Удобное время, пожелания, вопросы"></textarea></label><div class="order-preview" data-order-preview></div><p class="order-form__status" data-order-status role="status" aria-live="polite"></p><div class="order-form__actions"><button class="button button--primary button--full" type="submit">Отправить заказ</button><button class="button button--secondary button--full" type="button" data-order-close>Отмена</button></div></form></section></div>
+
+    <div class="toast" role="status" aria-live="polite" data-toast></div>
+    <script type="module" src="./src/app.js"></script>
+    <script type="module" src="./src/chat.js"></script>
+  </body>
+</html>
