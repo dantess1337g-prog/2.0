@@ -26,6 +26,7 @@ const e = {
   messages: $('[data-admin-messages]'),
   input: $('[data-admin-input]'),
   send: $('[data-admin-send]'),
+  closeConversation: $('[data-admin-close-conversation]'),
   reply: $('.chat-admin__reply'),
   refresh: $('[data-refresh]'),
   title: $('[data-active-title]'),
@@ -350,6 +351,7 @@ function setMode(nextMode) {
   e.orders.hidden = mode !== 'orders';
   e.conversations.hidden = mode !== 'chats';
   e.reply.hidden = mode !== 'chats';
+  if (e.closeConversation) e.closeConversation.hidden = mode !== 'chats';
   e.type.textContent = mode === 'orders' ? 'Заказ' : 'Диалог';
   e.title.textContent = mode === 'orders' ? 'Выберите заказ' : 'Выберите клиента';
   emptyState(
@@ -476,6 +478,7 @@ async function selectOrder(id, refreshList = true) {
   activeId = id;
   clearAdminUnread();
   e.reply.hidden = true;
+  if (e.closeConversation) e.closeConversation.hidden = true;
   e.type.textContent = 'Заказ';
   const order = await req(`/api/admin/orders/${encodeURIComponent(id)}`);
   e.title.textContent = order.number;
@@ -506,9 +509,38 @@ async function selectConversation(id) {
   activeId = id;
   clearAdminUnread();
   e.reply.hidden = false;
+  if (e.closeConversation) e.closeConversation.hidden = false;
   e.type.textContent = 'Диалог';
   await loadMessages(id);
   renderLists();
+}
+
+
+async function closeConversation() {
+  if (mode !== 'chats' || !activeId) return;
+  const currentId = activeId;
+  const confirmed = window.confirm('Закрыть это обращение? Клиент увидит кнопку «Создать новое обращение».');
+  if (!confirmed) return;
+
+  if (e.closeConversation) e.closeConversation.disabled = true;
+  try {
+    await req(`/api/admin/conversations/${encodeURIComponent(currentId)}/close`, {
+      method: 'PATCH',
+      body: JSON.stringify({ closed: true }),
+    });
+    conversations = conversations.filter((conversation) => conversation.id !== currentId);
+    activeId = '';
+    e.title.textContent = 'Выберите клиента';
+    e.type.textContent = 'Диалог';
+    emptyState('Обращение закрыто', 'Диалог скрыт из админ-панели. Клиент сможет создать новое обращение на сайте.');
+    renderLists();
+    await loadAll();
+    showAdminToast('Обращение закрыто', 'message');
+  } catch (error) {
+    showAdminToast(error.message || 'Не удалось закрыть обращение', 'warning');
+  } finally {
+    if (e.closeConversation) e.closeConversation.disabled = false;
+  }
 }
 
 async function sendReply() {
@@ -536,6 +568,7 @@ e.password.addEventListener('keydown', (event) => { if (event.key === 'Enter') l
 e.logout.addEventListener('click', logout);
 e.refresh.addEventListener('click', loadAll);
 e.send.addEventListener('click', sendReply);
+e.closeConversation?.addEventListener('click', closeConversation);
 e.tabs.forEach((tab) => tab.addEventListener('click', () => setMode(tab.dataset.adminTab)));
 e.input.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {

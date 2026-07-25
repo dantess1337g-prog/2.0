@@ -54,6 +54,12 @@ template.innerHTML = `
 
       <div class="chat-panel__body" data-chat-messages aria-live="polite"></div>
 
+      <div class="chat-panel__closed" data-chat-closed hidden>
+        <strong>Обращение закрыто</strong>
+        <p>Менеджер закрыл этот диалог. Чтобы продолжить общение, создайте новое обращение.</p>
+        <button type="button" data-chat-new>Создать новое обращение</button>
+      </div>
+
       <div class="chat-panel__form">
         <label class="sr-only" for="chat-text">Введите сообщение</label>
         <textarea id="chat-text" rows="1" maxlength="1200" placeholder="Введите сообщение" data-chat-input></textarea>
@@ -83,6 +89,8 @@ const unreadEl = $('[data-chat-unread]', widget);
 const noticeEl = $('[data-chat-notice]', widget);
 const notifyButton = $('[data-chat-notify]', widget);
 const notifyHint = $('[data-chat-notify-hint]', widget);
+const closedBox = $('[data-chat-closed]', widget);
+const newChatButton = $('[data-chat-new]', widget);
 const nameWrap = $('[data-chat-name-wrap]', widget);
 const nameInput = $('[data-chat-name]', widget);
 const nameHint = $('[data-chat-name-hint]', widget);
@@ -105,6 +113,7 @@ let hasLoadedFromServer = false;
 let audioContext;
 let dragState = null;
 let suppressOpenClick = false;
+let conversationClosed = false;
 
 if (!clientId) {
   clientId = crypto.randomUUID ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -121,8 +130,7 @@ function clamp(value, min, max) {
 }
 
 function panelSize() {
-  const isOpen = widget.classList.contains('is-open');
-  const rect = isOpen ? panel.getBoundingClientRect() : openButton.getBoundingClientRect();
+  const rect = openButton.getBoundingClientRect();
   return {
     width: Math.max(58, rect.width || openButton.offsetWidth || 58),
     height: Math.max(56, rect.height || openButton.offsetHeight || 56),
@@ -174,8 +182,16 @@ function formatCooldown(ms) {
 }
 
 function updateSendCooldownState() {
+  if (conversationClosed) {
+    sendButton.disabled = true;
+    input.disabled = true;
+    sendButton.classList.add('is-disabled');
+    return;
+  }
+
   const left = cooldownLeftMs();
   sendButton.disabled = left > 0;
+  input.disabled = false;
   sendButton.classList.toggle('is-disabled', left > 0);
   if (left > 0) {
     setStatus(`Следующее сообщение можно отправить через ${formatCooldown(left)}`, 'warning');
@@ -374,17 +390,58 @@ function setStatus(text, tone = '') {
   statusEl.dataset.tone = tone;
 }
 
+function setConversationClosed(closed) {
+  conversationClosed = Boolean(closed);
+  widget.classList.toggle('is-conversation-closed', conversationClosed);
+  if (closedBox) closedBox.hidden = !conversationClosed;
+  input.disabled = conversationClosed;
+  sendButton.disabled = conversationClosed || cooldownLeftMs() > 0;
+  sendButton.classList.toggle('is-disabled', sendButton.disabled);
+  if (conversationClosed) setStatus('Обращение закрыто. Создайте новое обращение, чтобы написать снова.', 'warning');
+}
+
+function resetConversationStorage() {
+  localStorage.removeItem(CHAT_ID_KEY);
+  localStorage.removeItem(CHAT_LAST_SEEN_MANAGER_KEY);
+  localStorage.removeItem(CHAT_LAST_NOTIFIED_MANAGER_KEY);
+  localStorage.removeItem(CHAT_LAST_SENT_AT_KEY);
+}
+
+function createNewConversation() {
+  resetConversationStorage();
+  clientId = crypto.randomUUID ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(CHAT_ID_KEY, clientId);
+  lastSeenManagerId = '';
+  lastNotifiedManagerId = '';
+  lastSentAt = 0;
+  messages = [...demoMessages];
+  hasLoadedFromServer = false;
+  setConversationClosed(false);
+  renderMessages(messages);
+  setUnread(0);
+  setStatus('Новое обращение создано');
+  updateSendCooldownState();
+  loadMessages();
+  input.focus();
+}
+
 async function request(url, options = {}) {
   const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Ошибка сервера');
+  if (!response.ok) {
+    const error = new Error(data.error || 'Ошибка сервера');
+    error.data = data;
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
-function handleIncomingMessages(nextMessages) {
+function handleIncomingMessages(nextMessages, closed = false) {
+  setConversationClosed(closed);
   const latestManager = latestManagerMessage(nextMessages);
   const isOpen = widget.classList.contains('is-open');
 
@@ -426,8 +483,10 @@ async function loadMessages() {
   try {
     const data = await request(`${CHAT_API}?clientId=${encodeURIComponent(clientId)}&name=${encodeURIComponent(clientName || '')}`);
     apiAvailable = true;
-    handleIncomingMessages(data.messages || []);
-    setStatus('');
+    clientId = data.clientId || clientId;
+    localStorage.setItem(CHAT_ID_KEY, clientId);
+    handleIncomingMessages(data.messages || [], Boolean(data.closed));
+    if (!data.closed) setStatus('');
   } catch {
     apiAvailable = false;
     renderMessages(messages);
@@ -464,6 +523,10 @@ function lockNameAfterSend() {
 }
 
 async function sendMessage() {
+  if (conversationClosed) {
+    setStatus('Это обращение закрыто. Нажмите «Создать новое обращение».', 'warning');
+    return;
+  }
   const text = input.value.trim();
   if (!text) return;
 
@@ -497,10 +560,15 @@ async function sendMessage() {
       body: JSON.stringify({ clientId, name: clientName, text }),
     });
     apiAvailable = true;
-    handleIncomingMessages(data.messages || []);
-    setStatus('Сообщение отправлено менеджеру');
+    handleIncomingMessages(data.messages || [], Boolean(data.closed));
+    if (!data.closed) setStatus('Сообщение отправлено менеджеру');
   } catch (error) {
     apiAvailable = false;
+    if (error.data?.closed) {
+      handleIncomingMessages(error.data.messages || messages, true);
+      setStatus('Это обращение закрыто. Создайте новое обращение.', 'warning');
+      return;
+    }
     setStatus(error.message || 'Не удалось отправить сообщение. Проверьте Netlify Functions и подключение Supabase.', 'warning');
   }
 }
@@ -553,7 +621,7 @@ function startChatDrag(event) {
   if (event.button !== undefined && event.button !== 0) return;
   if (event.currentTarget === panelTop && event.target.closest('button, input, textarea, select, a')) return;
 
-  const rect = widget.classList.contains('is-open') ? panel.getBoundingClientRect() : widget.getBoundingClientRect();
+  const rect = openButton.getBoundingClientRect();
   const currentX = rect.left;
   const currentY = rect.top;
 
@@ -613,6 +681,7 @@ openButton.addEventListener('click', openChat);
 closeButton.addEventListener('click', closeChat);
 sendButton.addEventListener('click', sendMessage);
 notifyButton?.addEventListener('click', requestNotifications);
+newChatButton?.addEventListener('click', createNewConversation);
 nameInput?.addEventListener('input', () => { saveName(); syncNameState(); });
 input.addEventListener('input', () => {
   input.style.height = 'auto';

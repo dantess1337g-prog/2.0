@@ -20,6 +20,7 @@ const STATUS_LABELS = {
 };
 
 let pool;
+let schemaReady = false;
 
 function getPool() {
   if (!process.env.DATABASE_URL) {
@@ -41,6 +42,13 @@ function getPool() {
 
 function query(text, params = []) {
   return getPool().query(text, params);
+}
+
+async function ensureRuntimeSchema() {
+  if (schemaReady) return;
+  await query('ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ');
+  await query('CREATE INDEX IF NOT EXISTS conversations_open_updated_at_idx ON public.conversations(updated_at DESC) WHERE closed_at IS NULL');
+  schemaReady = true;
 }
 
 function json(statusCode, data, headers = {}) {
@@ -75,6 +83,16 @@ function normalizeMessage(message) {
     author: message.author,
     text: message.text,
     createdAt: normalizeDate(message.createdAt ?? message.created_at),
+  };
+}
+
+function normalizeConversation(row) {
+  return row && {
+    ...row,
+    updatedAt: normalizeDate(row.updatedAt ?? row.updated_at),
+    createdAt: row.createdAt || row.created_at ? normalizeDate(row.createdAt ?? row.created_at) : undefined,
+    closedAt: row.closedAt || row.closed_at ? normalizeDate(row.closedAt ?? row.closed_at) : null,
+    closed: Boolean(row.closedAt || row.closed_at),
   };
 }
 
@@ -245,8 +263,9 @@ function getApiPath(event) {
 }
 
 async function ensureConversation(id, name = '') {
-  const conversationId = clean(id, 120) || crypto.randomUUID();
-  const existing = await query('SELECT id FROM public.conversations WHERE id = $1', [conversationId]);
+  const requestedId = clean(id, 120);
+  const conversationId = requestedId || crypto.randomUUID();
+  const existing = await query('SELECT id, name, closed_at AS "closedAt" FROM public.conversations WHERE id = $1', [conversationId]);
 
   if (!existing.rowCount) {
     const now = new Date();
@@ -259,11 +278,15 @@ async function ensureConversation(id, name = '') {
        VALUES($1, $2, 'manager', 'Поддержка Miracle Boost', $3, $4)`,
       [crypto.randomUUID(), conversationId, 'Здравствуйте! Это поддержка Miracle Boost. Напишите ваш вопрос — поможем с расчётом, оформлением или сделкой через FunPay.', now],
     );
-  } else if (clean(name)) {
+    return { id: conversationId, closed: false, closedAt: null };
+  }
+
+  const row = existing.rows[0];
+  if (!row.closedAt && clean(name)) {
     await query('UPDATE public.conversations SET name = $2 WHERE id = $1', [conversationId, cleanName(name)]);
   }
 
-  return conversationId;
+  return { id: conversationId, closed: Boolean(row.closedAt), closedAt: row.closedAt ? normalizeDate(row.closedAt) : null };
 }
 
 async function getMessages(conversationId) {
@@ -280,8 +303,8 @@ async function getMessages(conversationId) {
 
 async function handleChatMessages(event, searchParams) {
   if (event.httpMethod === 'GET') {
-    const conversationId = await ensureConversation(searchParams.get('clientId'), searchParams.get('name'));
-    return json(200, { clientId: conversationId, messages: await getMessages(conversationId) });
+    const conversation = await ensureConversation(searchParams.get('clientId'), searchParams.get('name'));
+    return json(200, { clientId: conversation.id, closed: conversation.closed, closedAt: conversation.closedAt, messages: await getMessages(conversation.id) });
   }
 
   if (event.httpMethod === 'POST') {
@@ -289,7 +312,11 @@ async function handleChatMessages(event, searchParams) {
     const text = clean(body.text);
     if (!text) return json(400, { error: 'Введите сообщение' });
 
-    const conversationId = await ensureConversation(body.clientId, body.name);
+    const conversation = await ensureConversation(body.clientId, body.name);
+    const conversationId = conversation.id;
+    if (conversation.closed) {
+      return json(409, { error: 'Это обращение закрыто. Создайте новое обращение.', closed: true, clientId: conversationId, messages: await getMessages(conversationId) });
+    }
 
     const recentResult = await query(
       `SELECT created_at
@@ -318,7 +345,7 @@ async function handleChatMessages(event, searchParams) {
       [crypto.randomUUID(), conversationId, author, text, now],
     );
 
-    return json(201, { clientId: conversationId, messages: await getMessages(conversationId) });
+    return json(201, { clientId: conversationId, closed: false, messages: await getMessages(conversationId) });
   }
 
   return json(405, { error: 'Method not allowed' });
@@ -450,6 +477,7 @@ async function handleAdminConversations(event) {
     SELECT
       c.id,
       c.name,
+      c.closed_at AS "closedAt",
       c.updated_at AS "updatedAt",
       COALESCE(last_message.text, '') AS "lastText",
       COALESCE(last_message.role, '') AS "lastRole",
@@ -467,10 +495,12 @@ async function handleAdminConversations(event) {
       FROM public.messages
       WHERE conversation_id = c.id
     ) stats ON true
+    WHERE c.closed_at IS NULL
+      AND c.id NOT LIKE 'order-%'
     ORDER BY c.updated_at DESC
   `);
 
-  return json(200, { conversations: result.rows.map((row) => ({ ...row, updatedAt: normalizeDate(row.updatedAt) })) });
+  return json(200, { conversations: result.rows.map(normalizeConversation) });
 }
 
 async function handleAdminConversation(event, conversationId) {
@@ -479,15 +509,13 @@ async function handleAdminConversation(event, conversationId) {
 
   if (event.httpMethod === 'GET') {
     const result = await query(
-      'SELECT id, name, created_at AS "createdAt", updated_at AS "updatedAt" FROM public.conversations WHERE id = $1',
+      'SELECT id, name, closed_at AS "closedAt", created_at AS "createdAt", updated_at AS "updatedAt" FROM public.conversations WHERE id = $1',
       [conversationId],
     );
-    const conversation = result.rows[0];
+    const conversation = normalizeConversation(result.rows[0] || null);
     if (!conversation) return json(404, { error: 'Диалог не найден' });
     return json(200, {
       ...conversation,
-      createdAt: normalizeDate(conversation.createdAt),
-      updatedAt: normalizeDate(conversation.updatedAt),
       messages: await getMessages(conversationId),
     });
   }
@@ -505,8 +533,9 @@ async function handleAdminConversationMessage(event, conversationId) {
   const text = clean(body.text);
   if (!text) return json(400, { error: 'Введите ответ' });
 
-  const existing = await query('SELECT id FROM public.conversations WHERE id = $1', [conversationId]);
+  const existing = await query('SELECT id, closed_at AS "closedAt" FROM public.conversations WHERE id = $1', [conversationId]);
   if (!existing.rowCount) return json(404, { error: 'Диалог не найден' });
+  if (existing.rows[0].closedAt) return json(409, { error: 'Это обращение уже закрыто' });
 
   const now = new Date();
   await query('UPDATE public.conversations SET updated_at = $2 WHERE id = $1', [conversationId, now]);
@@ -517,17 +546,38 @@ async function handleAdminConversationMessage(event, conversationId) {
   );
 
   const result = await query(
-    'SELECT id, name, created_at AS "createdAt", updated_at AS "updatedAt" FROM public.conversations WHERE id = $1',
+    'SELECT id, name, closed_at AS "closedAt", created_at AS "createdAt", updated_at AS "updatedAt" FROM public.conversations WHERE id = $1',
     [conversationId],
   );
-  const conversation = result.rows[0];
+  const conversation = normalizeConversation(result.rows[0] || null);
 
   return json(201, {
     ...conversation,
-    createdAt: normalizeDate(conversation.createdAt),
-    updatedAt: normalizeDate(conversation.updatedAt),
     messages: await getMessages(conversationId),
   });
+}
+
+
+async function handleAdminConversationClose(event, conversationId) {
+  const admin = await requireAdmin(event);
+  if (!admin) return json(401, { error: 'Нужна авторизация' });
+
+  if (event.httpMethod !== 'PATCH' && event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
+
+  const existing = await query('SELECT id, closed_at AS "closedAt" FROM public.conversations WHERE id = $1', [conversationId]);
+  if (!existing.rowCount) return json(404, { error: 'Диалог не найден' });
+
+  const now = new Date();
+  if (!existing.rows[0].closedAt) {
+    await query(
+      `INSERT INTO public.messages(id, conversation_id, role, author, text, created_at)
+       VALUES($1, $2, 'manager', 'Поддержка Miracle Boost', $3, $4)`,
+      [crypto.randomUUID(), conversationId, 'Обращение закрыто менеджером. Чтобы продолжить, создайте новое обращение.', now],
+    );
+    await query('UPDATE public.conversations SET closed_at = $2, updated_at = $2 WHERE id = $1', [conversationId, now]);
+  }
+
+  return json(200, { ok: true, closed: true, closedAt: normalizeDate(now) });
 }
 
 async function handleAdminOrders(event) {
@@ -583,6 +633,7 @@ async function handleAdminOrderStatus(event, orderId) {
 
 exports.handler = async (event) => {
   try {
+    await ensureRuntimeSchema();
     const { pathname, searchParams } = getApiPath(event);
 
     if (pathname === '/api/chat/messages') return await handleChatMessages(event, searchParams);
@@ -601,6 +652,9 @@ exports.handler = async (event) => {
 
     match = pathname.match(/^\/api\/admin\/conversations\/([^/]+)$/);
     if (match) return await handleAdminConversation(event, decodeURIComponent(match[1]));
+
+    match = pathname.match(/^\/api\/admin\/conversations\/([^/]+)\/close$/);
+    if (match) return await handleAdminConversationClose(event, decodeURIComponent(match[1]));
 
     match = pathname.match(/^\/api\/admin\/conversations\/([^/]+)\/messages$/);
     if (match) return await handleAdminConversationMessage(event, decodeURIComponent(match[1]));

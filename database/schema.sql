@@ -9,6 +9,7 @@ CREATE SEQUENCE IF NOT EXISTS public.order_number_seq START 1;
 CREATE TABLE IF NOT EXISTS public.conversations (
   id TEXT PRIMARY KEY,
   name VARCHAR(80) NOT NULL DEFAULT 'Клиент',
+  closed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS public.admin_sessions (
 );
 
 -- Миграция для старой версии таблицы, если она уже была создана ранее.
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.orders ALTER COLUMN status SET DEFAULT 'queue';
 UPDATE public.orders SET status = 'queue' WHERE status = 'new';
@@ -104,6 +106,7 @@ BEFORE UPDATE ON public.admin_users
 FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 
 CREATE INDEX IF NOT EXISTS conversations_updated_at_idx ON public.conversations(updated_at DESC);
+CREATE INDEX IF NOT EXISTS conversations_open_updated_at_idx ON public.conversations(updated_at DESC) WHERE closed_at IS NULL;
 CREATE INDEX IF NOT EXISTS messages_conversation_created_at_idx ON public.messages(conversation_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS orders_created_at_idx ON public.orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS orders_status_idx ON public.orders(status);

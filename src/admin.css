@@ -545,3 +545,27 @@ html,
   background: #248e51 !important;
   color: #ffffff !important;
 }
+
+/* close support request button */
+.chat-admin__reply {
+  grid-template-columns: 1fr auto auto;
+}
+.chat-admin__close-ticket {
+  background: rgba(255,255,255,.12) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+}
+.chat-admin__close-ticket:hover {
+  background: rgba(145,0,41,.16) !important;
+}
+:root[data-theme="dark"] .chat-admin__close-ticket {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  background: rgba(255,255,255,.08) !important;
+  border-color: rgba(236,244,247,.22) !important;
+}
+@media (max-width: 860px) {
+  .chat-admin__reply { grid-template-columns: 1fr; }
+  .chat-admin__reply button { width: 100%; }
+}
