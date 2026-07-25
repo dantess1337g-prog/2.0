@@ -4,9 +4,11 @@ const CHAT_NAME_KEY = 'miracle-boost-chat-name';
 const CHAT_NAME_LOCK_KEY = 'miracle-boost-chat-name-locked';
 const CHAT_LAST_SEEN_MANAGER_KEY = 'miracle-boost-chat-last-seen-manager-id';
 const CHAT_LAST_NOTIFIED_MANAGER_KEY = 'miracle-boost-chat-last-notified-manager-id';
-const CHAT_SIDE_KEY = 'miracle-boost-chat-side';
+const CHAT_POSITION_KEY = 'miracle-boost-chat-position';
 const CHAT_NOTIFY_ENABLED_KEY = 'miracle-boost-chat-notify-enabled';
+const CHAT_LAST_SENT_AT_KEY = 'miracle-boost-chat-last-sent-at';
 const POLL_INTERVAL = 2600;
+const MESSAGE_COOLDOWN_MS = 30_000;
 
 const demoMessages = [
   {
@@ -43,7 +45,11 @@ template.innerHTML = `
             <small>Support</small>
           </div>
         </div>
-        <button class="chat-panel__notify" type="button" data-chat-notify aria-label="Включить уведомления о новых ответах">🔔</button>
+      </div>
+
+      <div class="chat-panel__tools">
+        <button class="chat-panel__notify" type="button" data-chat-notify aria-label="Включить уведомления о новых ответах">🔔 Включить уведомления</button>
+        <small data-chat-notify-hint>Перетащите чат за кнопку или шапку, чтобы поставить его в любое место.</small>
       </div>
 
       <div class="chat-panel__body" data-chat-messages aria-live="polite"></div>
@@ -76,6 +82,7 @@ const statusEl = $('[data-chat-status]', widget);
 const unreadEl = $('[data-chat-unread]', widget);
 const noticeEl = $('[data-chat-notice]', widget);
 const notifyButton = $('[data-chat-notify]', widget);
+const notifyHint = $('[data-chat-notify-hint]', widget);
 const nameWrap = $('[data-chat-name-wrap]', widget);
 const nameInput = $('[data-chat-name]', widget);
 const nameHint = $('[data-chat-name-hint]', widget);
@@ -86,8 +93,9 @@ let clientName = localStorage.getItem(CHAT_NAME_KEY) || '';
 let nameLocked = localStorage.getItem(CHAT_NAME_LOCK_KEY) === 'true';
 let lastSeenManagerId = localStorage.getItem(CHAT_LAST_SEEN_MANAGER_KEY) || '';
 let lastNotifiedManagerId = localStorage.getItem(CHAT_LAST_NOTIFIED_MANAGER_KEY) || '';
-let chatSide = localStorage.getItem(CHAT_SIDE_KEY) === 'left' ? 'left' : 'right';
+let chatPosition = loadChatPosition();
 let notificationsEnabled = localStorage.getItem(CHAT_NOTIFY_ENABLED_KEY) !== 'false';
+let lastSentAt = Number(localStorage.getItem(CHAT_LAST_SENT_AT_KEY) || 0);
 let messages = [...demoMessages];
 let pollTimer;
 let noticeTimer;
@@ -108,16 +116,75 @@ function formatTime(dateString) {
   return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date(dateString));
 }
 
-function applyChatSide(side) {
-  chatSide = side === 'left' ? 'left' : 'right';
-  localStorage.setItem(CHAT_SIDE_KEY, chatSide);
-  widget.classList.toggle('is-left', chatSide === 'left');
-  widget.classList.toggle('is-right', chatSide !== 'left');
-
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
-function applyChatSideFromPointer(clientX) {
-  applyChatSide(clientX < window.innerWidth / 2 ? 'left' : 'right');
+function panelSize() {
+  const isOpen = widget.classList.contains('is-open');
+  const rect = isOpen ? panel.getBoundingClientRect() : openButton.getBoundingClientRect();
+  return {
+    width: Math.max(58, rect.width || openButton.offsetWidth || 58),
+    height: Math.max(56, rect.height || openButton.offsetHeight || 56),
+  };
+}
+
+function defaultChatPosition() {
+  const width = 170;
+  const height = 56;
+  return {
+    x: Math.max(14, window.innerWidth - width - 24),
+    y: Math.max(14, window.innerHeight - height - 24),
+  };
+}
+
+function loadChatPosition() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CHAT_POSITION_KEY) || 'null');
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) return saved;
+  } catch {
+    // повреждённое значение игнорируем
+  }
+  return defaultChatPosition();
+}
+
+function applyChatPosition(position = chatPosition, shouldSave = true) {
+  const size = panelSize();
+  const margin = window.innerWidth <= 620 ? 10 : 16;
+  chatPosition = {
+    x: clamp(Number(position.x || 0), margin, Math.max(margin, window.innerWidth - size.width - margin)),
+    y: clamp(Number(position.y || 0), margin, Math.max(margin, window.innerHeight - size.height - margin)),
+  };
+
+  widget.style.left = `${Math.round(chatPosition.x)}px`;
+  widget.style.top = `${Math.round(chatPosition.y)}px`;
+  widget.style.right = 'auto';
+  widget.style.bottom = 'auto';
+  widget.classList.add('is-free-position');
+
+  if (shouldSave) localStorage.setItem(CHAT_POSITION_KEY, JSON.stringify(chatPosition));
+}
+
+function cooldownLeftMs() {
+  return Math.max(0, MESSAGE_COOLDOWN_MS - (Date.now() - lastSentAt));
+}
+
+function formatCooldown(ms) {
+  return `${Math.ceil(ms / 1000)} сек.`;
+}
+
+function updateSendCooldownState() {
+  const left = cooldownLeftMs();
+  sendButton.disabled = left > 0;
+  sendButton.classList.toggle('is-disabled', left > 0);
+  if (left > 0) {
+    setStatus(`Следующее сообщение можно отправить через ${formatCooldown(left)}`, 'warning');
+    return;
+  }
+
+  if (statusEl.dataset.tone === 'warning' && /сообщени|Подождите|Следующее/.test(statusEl.textContent || '')) {
+    setStatus('');
+  }
 }
 
 function managerMessages(list = messages) {
@@ -193,11 +260,10 @@ function playNotifySound() {
 
     const now = audioContext.currentTime;
     const notes = [
-      { at: 0.00, freq: 520, duration: 0.30 },
-      { at: 0.34, freq: 720, duration: 0.34 },
-      { at: 0.74, freq: 920, duration: 0.36 },
-      { at: 1.16, freq: 720, duration: 0.36 },
-      { at: 1.58, freq: 1040, duration: 0.42 },
+      { at: 0.00, freq: 620, duration: 0.24 },
+      { at: 0.28, freq: 820, duration: 0.26 },
+      { at: 0.58, freq: 1040, duration: 0.28 },
+      { at: 0.92, freq: 820, duration: 0.32 },
     ];
 
     notes.forEach((note) => {
@@ -208,16 +274,16 @@ function playNotifySound() {
 
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(note.freq, startAt);
-      oscillator.frequency.exponentialRampToValueAtTime(note.freq * 1.06, endAt);
+      oscillator.frequency.exponentialRampToValueAtTime(note.freq * 1.08, endAt);
 
       gain.gain.setValueAtTime(0.0001, startAt);
-      gain.gain.exponentialRampToValueAtTime(0.07, startAt + 0.045);
+      gain.gain.exponentialRampToValueAtTime(0.062, startAt + 0.035);
       gain.gain.exponentialRampToValueAtTime(0.0001, endAt);
 
       oscillator.connect(gain);
       gain.connect(audioContext.destination);
       oscillator.start(startAt);
-      oscillator.stop(endAt + 0.03);
+      oscillator.stop(endAt + 0.02);
     });
   } catch {
     // Звук может быть заблокирован браузером до действия пользователя.
@@ -244,13 +310,12 @@ function startTitleBlink(count) {
 }
 
 function notifyManagerReply(message, unreadCount) {
-  const preview = String(message.text || 'Новое сообщение').slice(0, 140);
+  const preview = String(message.text || 'Новое сообщение').slice(0, 90);
   setUnread(unreadCount);
   startTitleBlink(unreadCount);
 
   if (!notificationsEnabled) return;
 
-  // Показываем уведомление и звук независимо от того, открыт чат или закрыт.
   showNotice(`Поддержка ответила: ${preview}`);
   playNotifySound();
   browserNotify('Поддержка Miracle Boost ответила', preview);
@@ -260,21 +325,22 @@ function updateNotificationButton() {
   if (!notifyButton) return;
   const permission = 'Notification' in window ? Notification.permission : 'unsupported';
   notifyButton.dataset.state = notificationsEnabled ? 'enabled' : 'disabled';
-  notifyButton.dataset.permission = permission;
   notifyButton.setAttribute('aria-pressed', String(notificationsEnabled));
 
   if (!notificationsEnabled) {
     notifyButton.title = 'Включить уведомления поддержки';
     notifyButton.setAttribute('aria-label', 'Включить уведомления поддержки');
-    notifyButton.textContent = '🔕';
+    notifyButton.textContent = '🔕 Уведомления выключены';
+    if (notifyHint) notifyHint.textContent = 'Нажмите, чтобы включить уведомления о ответах поддержки.';
     return;
   }
 
-  notifyButton.textContent = '🔔';
+  notifyButton.textContent = '🔔 Уведомления включены';
   notifyButton.title = permission === 'denied'
-    ? 'Уведомления на сайте включены, но браузерные уведомления заблокированы'
+    ? 'Уведомления включены на сайте, но браузерные уведомления заблокированы'
     : 'Выключить уведомления поддержки';
   notifyButton.setAttribute('aria-label', 'Выключить уведомления поддержки');
+  if (notifyHint) notifyHint.textContent = 'Перетащите чат за кнопку или шапку, чтобы поставить его в любое место.';
 }
 
 function renderMessages(nextMessages = messages) {
@@ -339,7 +405,7 @@ function handleIncomingMessages(nextMessages) {
     localStorage.setItem(CHAT_LAST_NOTIFIED_MANAGER_KEY, lastNotifiedManagerId);
   }
 
-  const unreadBeforeMark = countUnread(nextMessages);
+  const unreadBeforeRender = countUnread(nextMessages);
   const hasNewManagerReply = hasLoadedFromServer && latestManager.id !== lastNotifiedManagerId;
 
   renderMessages(nextMessages);
@@ -347,12 +413,11 @@ function handleIncomingMessages(nextMessages) {
   if (hasNewManagerReply) {
     lastNotifiedManagerId = latestManager.id;
     localStorage.setItem(CHAT_LAST_NOTIFIED_MANAGER_KEY, lastNotifiedManagerId);
-    // Уведомление срабатывает даже когда окно чата уже открыто.
-    notifyManagerReply(latestManager, Math.max(1, unreadBeforeMark));
+    notifyManagerReply(latestManager, unreadBeforeRender);
   }
 
   if (isOpen) markManagerMessagesAsSeen(nextMessages);
-  else setUnread(unreadBeforeMark);
+  else setUnread(unreadBeforeRender);
 
   hasLoadedFromServer = true;
 }
@@ -401,9 +466,20 @@ function lockNameAfterSend() {
 async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
+
+  const left = cooldownLeftMs();
+  if (left > 0) {
+    setStatus(`Подождите ${formatCooldown(left)} перед следующим сообщением`, 'warning');
+    updateSendCooldownState();
+    return;
+  }
+
   saveName();
   input.value = '';
   input.style.height = 'auto';
+  lastSentAt = Date.now();
+  localStorage.setItem(CHAT_LAST_SENT_AT_KEY, String(lastSentAt));
+  updateSendCooldownState();
 
   const localMessage = {
     id: `local-${Date.now()}`,
@@ -423,9 +499,9 @@ async function sendMessage() {
     apiAvailable = true;
     handleIncomingMessages(data.messages || []);
     setStatus('Сообщение отправлено менеджеру');
-  } catch {
+  } catch (error) {
     apiAvailable = false;
-    setStatus('Не удалось отправить сообщение. Проверьте Netlify Functions и подключение Supabase.', 'warning');
+    setStatus(error.message || 'Не удалось отправить сообщение. Проверьте Netlify Functions и подключение Supabase.', 'warning');
   }
 }
 
@@ -433,6 +509,7 @@ function openChat() {
   if (suppressOpenClick) return;
   widget.classList.add('is-open');
   panel.setAttribute('aria-hidden', 'false');
+  applyChatPosition(chatPosition);
   input.focus();
   loadMessages().then(() => markManagerMessagesAsSeen()).catch(() => {});
 }
@@ -440,6 +517,7 @@ function openChat() {
 function closeChat() {
   widget.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
+  applyChatPosition(chatPosition);
 }
 
 function startPolling() {
@@ -475,10 +553,16 @@ function startChatDrag(event) {
   if (event.button !== undefined && event.button !== 0) return;
   if (event.currentTarget === panelTop && event.target.closest('button, input, textarea, select, a')) return;
 
+  const rect = widget.classList.contains('is-open') ? panel.getBoundingClientRect() : widget.getBoundingClientRect();
+  const currentX = rect.left;
+  const currentY = rect.top;
+
   dragState = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
+    originX: currentX,
+    originY: currentY,
     active: false,
   };
 
@@ -488,13 +572,15 @@ function startChatDrag(event) {
 function moveChatDrag(event) {
   if (!dragState || event.pointerId !== dragState.pointerId) return;
 
-  const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
-  if (distance < 9 && !dragState.active) return;
+  const dx = event.clientX - dragState.startX;
+  const dy = event.clientY - dragState.startY;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 8 && !dragState.active) return;
 
   dragState.active = true;
   suppressOpenClick = true;
   widget.classList.add('is-dragging');
-  applyChatSideFromPointer(event.clientX);
+  applyChatPosition({ x: dragState.originX + dx, y: dragState.originY + dy });
   event.preventDefault();
 }
 
@@ -506,10 +592,9 @@ function endChatDrag(event) {
   widget.classList.remove('is-dragging');
 
   if (wasDragging) {
-    showNotice(chatSide === 'left' ? 'Чат закреплён слева' : 'Чат закреплён справа');
     setTimeout(() => {
       suppressOpenClick = false;
-    }, 120);
+    }, 140);
   } else {
     suppressOpenClick = false;
   }
@@ -524,8 +609,6 @@ function setupChatDrag() {
   });
 }
 
-document.addEventListener('pointerdown', unlockAudio, { once: true });
-document.addEventListener('keydown', unlockAudio, { once: true });
 openButton.addEventListener('click', openChat);
 closeButton.addEventListener('click', closeChat);
 sendButton.addEventListener('click', sendMessage);
@@ -546,10 +629,13 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && countUnread(messages) === 0) document.title = originalTitle;
 });
 
-applyChatSide(chatSide);
+applyChatPosition(chatPosition, false);
+window.addEventListener('resize', () => applyChatPosition(chatPosition));
 syncNameState();
 updateNotificationButton();
 setupChatDrag();
 renderMessages();
+updateSendCooldownState();
+setInterval(updateSendCooldownState, 1000);
 loadMessages();
 startPolling();

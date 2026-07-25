@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60;
 const ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_SECONDS * 1000;
 const STATUSES = ['queue', 'payment', 'boosting', 'done'];
+const CHAT_MESSAGE_COOLDOWN_SECONDS = 30;
 const ELO_LIMITS = Object.freeze({
   minCurrent: 100,
   maxCurrent: 2000,
@@ -289,6 +290,24 @@ async function handleChatMessages(event, searchParams) {
     if (!text) return json(400, { error: 'Введите сообщение' });
 
     const conversationId = await ensureConversation(body.clientId, body.name);
+
+    const recentResult = await query(
+      `SELECT created_at
+       FROM public.messages
+       WHERE conversation_id = $1
+         AND role = 'client'
+         AND created_at > now() - ($2::int * interval '1 second')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [conversationId, CHAT_MESSAGE_COOLDOWN_SECONDS],
+    );
+
+    if (recentResult.rowCount) {
+      const lastCreated = new Date(recentResult.rows[0].created_at).getTime();
+      const secondsLeft = Math.max(1, Math.ceil((CHAT_MESSAGE_COOLDOWN_SECONDS * 1000 - (Date.now() - lastCreated)) / 1000));
+      return json(429, { error: `Подождите ${secondsLeft} сек. перед следующим сообщением`, secondsLeft });
+    }
+
     const now = new Date();
     const author = cleanName(body.name);
 
@@ -328,7 +347,15 @@ async function handleCreateOrder(event) {
     [order.id, order.number, order.status, order.telegram, order.email, order.comment, JSON.stringify(order.calculation), order.isPriority, now],
   );
 
-  // Заказы показываются только во вкладке «Заказы», не в списке чатов.
+  await query(
+    'INSERT INTO public.conversations(id, name, created_at, updated_at) VALUES($1, $2, $3, $3)',
+    [`order-${id}`, `Заказ ${order.number}`, now],
+  );
+  await query(
+    `INSERT INTO public.messages(id, conversation_id, role, author, text, created_at)
+     VALUES($1, $2, 'client', 'Заявка с сайта', $3, $4)`,
+    [crypto.randomUUID(), `order-${id}`, orderText(order), now],
+  );
 
   return json(201, { order: normalizeOrder(order) });
 }
@@ -440,7 +467,6 @@ async function handleAdminConversations(event) {
       FROM public.messages
       WHERE conversation_id = c.id
     ) stats ON true
-    WHERE c.id NOT LIKE 'order-%'
     ORDER BY c.updated_at DESC
   `);
 
