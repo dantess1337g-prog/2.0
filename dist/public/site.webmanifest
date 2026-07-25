@@ -1,0 +1,16 @@
+{
+  "name": "Miracle Boost",
+  "short_name": "Miracle Boost",
+  "lang": "ru",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ECF4F7",
+  "theme_color": "#910029",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

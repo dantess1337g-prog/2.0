@@ -1,5 +1,5 @@
-import crypto from 'node:crypto';
-import { Pool } from 'pg';
+const crypto = require('node:crypto');
+const { Pool } = require('pg');
 
 const ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60;
 const ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_SECONDS * 1000;
@@ -546,7 +546,7 @@ async function handleAdminOrderStatus(event, orderId) {
   return order ? json(200, { order }) : json(404, { error: 'Заказ не найден' });
 }
 
-export const handler = async (event) => {
+exports.handler = async (event) => {
   try {
     const { pathname, searchParams } = getApiPath(event);
 
