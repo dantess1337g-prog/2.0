@@ -1,5 +1,6 @@
 const THEME_KEY = 'miracle-boost-theme';
 const ADMIN_NOTIFY_PERMISSION_KEY = 'miracle-boost-admin-notify-hint-shown';
+const ADMIN_NOTIFY_ENABLED_KEY = 'miracle-boost-admin-notify-enabled';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
@@ -44,6 +45,7 @@ let notificationReady = false;
 let previousOrderIds = new Set();
 let previousConversationState = new Map();
 let adminUnreadCount = 0;
+let adminNotificationsEnabled = localStorage.getItem(ADMIN_NOTIFY_ENABLED_KEY) !== 'false';
 let adminToastTimer;
 let adminTitleTimer;
 let audioContext;
@@ -99,18 +101,32 @@ function playNotifySound() {
     audioContext ||= new AudioContext();
     if (audioContext.state === 'suspended') audioContext.resume();
 
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = 'triangle';
-    oscillator.frequency.setValueAtTime(660, audioContext.currentTime);
-    oscillator.frequency.setValueAtTime(920, audioContext.currentTime + 0.09);
-    gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.06, audioContext.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.28);
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.3);
+    const now = audioContext.currentTime;
+    const notes = [
+      { at: 0.00, freq: 560, duration: 0.32 },
+      { at: 0.38, freq: 760, duration: 0.34 },
+      { at: 0.78, freq: 980, duration: 0.38 },
+      { at: 1.22, freq: 760, duration: 0.38 },
+      { at: 1.68, freq: 1120, duration: 0.44 },
+    ];
+
+    notes.forEach((note) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const startAt = now + note.at;
+      const endAt = startAt + note.duration;
+
+      oscillator.type = 'triangle';
+      oscillator.frequency.setValueAtTime(note.freq, startAt);
+      oscillator.frequency.exponentialRampToValueAtTime(note.freq * 1.04, endAt);
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.065, startAt + 0.045);
+      gain.gain.exponentialRampToValueAtTime(0.0001, endAt);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(endAt + 0.03);
+    });
   } catch {
     // Браузер может блокировать звук до пользовательского действия.
   }
@@ -183,33 +199,47 @@ function updateNotifyButton() {
   }
   if (!button) return;
 
-  if (!('Notification' in window)) {
-    button.hidden = true;
+  const permission = 'Notification' in window ? Notification.permission : 'unsupported';
+  button.dataset.permission = permission;
+  button.dataset.enabled = String(adminNotificationsEnabled);
+  button.setAttribute('aria-pressed', String(adminNotificationsEnabled));
+
+  if (!adminNotificationsEnabled) {
+    button.textContent = '🔕 Уведомления выключены';
+    button.title = 'Нажмите, чтобы включить уведомления админки';
     return;
   }
 
-  const permission = Notification.permission;
-  button.dataset.permission = permission;
-  button.textContent = permission === 'granted' ? '🔔 Уведомления включены' : '🔕 Включить уведомления';
+  button.textContent = permission === 'granted' ? '🔔 Уведомления включены' : '🔔 Уведомления на сайте';
   button.title = permission === 'denied'
-    ? 'Уведомления заблокированы в настройках браузера'
-    : permission === 'granted'
-      ? 'Браузерные уведомления включены'
-      : 'Нажмите, чтобы включить браузерные уведомления';
+    ? 'Уведомления на сайте включены, но браузерные уведомления заблокированы'
+    : 'Нажмите, чтобы выключить уведомления админки';
 }
 
 async function requestAdminNotifications() {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'default') {
-    const result = await Notification.requestPermission();
-    showAdminToast(result === 'granted' ? 'Браузерные уведомления включены' : 'Браузерные уведомления не включены', result === 'granted' ? 'message' : 'warning');
+  adminNotificationsEnabled = !adminNotificationsEnabled;
+  localStorage.setItem(ADMIN_NOTIFY_ENABLED_KEY, adminNotificationsEnabled ? 'true' : 'false');
+
+  if (adminNotificationsEnabled) {
+    if ('Notification' in window && Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        // Браузер может не показать запрос разрешения.
+      }
+    }
+    updateNotifyButton();
+    showAdminToast('Уведомления админки включены', 'message');
+    playNotifySound();
   } else {
-    showAdminToast(Notification.permission === 'granted' ? 'Браузерные уведомления уже включены' : 'Разрешите уведомления в настройках браузера', Notification.permission === 'granted' ? 'message' : 'warning');
+    clearAdminUnread();
+    updateNotifyButton();
+    showAdminToast('Уведомления админки выключены', 'warning');
   }
-  updateNotifyButton();
 }
 
 function notifyAdmin(title, body, tone = 'message', tag = 'miracle-boost-admin') {
+  if (!adminNotificationsEnabled) return;
   addAdminUnread();
   showAdminToast(`${title}: ${body}`, tone);
   playNotifySound();
@@ -255,6 +285,14 @@ function processAdminNotifications(nextOrders, nextConversations) {
 function setupNotifications() {
   ensureAdminToast();
   updateNotifyButton();
+  document.addEventListener('pointerdown', () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      audioContext ||= new AudioContext();
+      if (audioContext.state === 'suspended') audioContext.resume();
+    } catch {}
+  }, { once: true });
   document.addEventListener('click', (event) => {
     if (event.target.closest('[data-admin-notify-toggle]')) requestAdminNotifications();
   });
@@ -358,8 +396,9 @@ function renderLists() {
     e.orders.append(button);
   });
 
-  e.conversations.innerHTML = conversations.length ? '' : '<div class="empty-state empty-state--sidebar"><p>Пока нет сообщений.</p></div>';
-  conversations.forEach((conversation) => {
+  const visibleConversations = conversations.filter((conversation) => !String(conversation.id || '').startsWith('order-'));
+  e.conversations.innerHTML = visibleConversations.length ? '' : '<div class="empty-state empty-state--sidebar"><p>Пока нет сообщений.</p></div>';
+  visibleConversations.forEach((conversation) => {
     const button = document.createElement('button');
     const hasClientMessage = conversation.lastRole === 'client' && !(conversation.id === activeId && mode === 'chats');
     button.className = `conversation${conversation.id === activeId && mode === 'chats' ? ' is-active' : ''}${hasClientMessage ? ' conversation--unread' : ''}`;
@@ -441,7 +480,7 @@ async function loadAll() {
     processAdminNotifications(nextOrders, nextConversations);
     orders = nextOrders;
     conversations = nextConversations;
-    e.status.textContent = `Заказов: ${orders.length} · Диалогов: ${conversations.length}`;
+    e.status.textContent = `Заказов: ${orders.length} · Диалогов: ${conversations.filter((conversation) => !String(conversation.id || '').startsWith('order-')).length}`;
     renderLists();
     if (activeId && mode === 'orders') await selectOrder(activeId, false);
     if (activeId && mode === 'chats') await loadMessages(activeId, false);

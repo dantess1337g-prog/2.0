@@ -5,6 +5,7 @@ const CHAT_NAME_LOCK_KEY = 'miracle-boost-chat-name-locked';
 const CHAT_LAST_SEEN_MANAGER_KEY = 'miracle-boost-chat-last-seen-manager-id';
 const CHAT_LAST_NOTIFIED_MANAGER_KEY = 'miracle-boost-chat-last-notified-manager-id';
 const CHAT_SIDE_KEY = 'miracle-boost-chat-side';
+const CHAT_NOTIFY_ENABLED_KEY = 'miracle-boost-chat-notify-enabled';
 const POLL_INTERVAL = 2600;
 
 const demoMessages = [
@@ -42,7 +43,6 @@ template.innerHTML = `
             <small>Support</small>
           </div>
         </div>
-        <button class="chat-panel__side" type="button" data-chat-side aria-label="Переместить чат на левую сторону" title="Переместить чат влево">↔</button>
         <button class="chat-panel__notify" type="button" data-chat-notify aria-label="Включить уведомления о новых ответах">🔔</button>
       </div>
 
@@ -68,6 +68,7 @@ const widget = $('[data-chat-widget]');
 const openButton = $('[data-chat-open]', widget);
 const closeButton = $('[data-chat-close]', widget);
 const panel = $('[data-chat-panel]', widget);
+const panelTop = $('.chat-panel__top', widget);
 const messagesEl = $('[data-chat-messages]', widget);
 const input = $('[data-chat-input]', widget);
 const sendButton = $('[data-chat-send]', widget);
@@ -75,7 +76,6 @@ const statusEl = $('[data-chat-status]', widget);
 const unreadEl = $('[data-chat-unread]', widget);
 const noticeEl = $('[data-chat-notice]', widget);
 const notifyButton = $('[data-chat-notify]', widget);
-const sideButton = $('[data-chat-side]', widget);
 const nameWrap = $('[data-chat-name-wrap]', widget);
 const nameInput = $('[data-chat-name]', widget);
 const nameHint = $('[data-chat-name-hint]', widget);
@@ -87,6 +87,7 @@ let nameLocked = localStorage.getItem(CHAT_NAME_LOCK_KEY) === 'true';
 let lastSeenManagerId = localStorage.getItem(CHAT_LAST_SEEN_MANAGER_KEY) || '';
 let lastNotifiedManagerId = localStorage.getItem(CHAT_LAST_NOTIFIED_MANAGER_KEY) || '';
 let chatSide = localStorage.getItem(CHAT_SIDE_KEY) === 'left' ? 'left' : 'right';
+let notificationsEnabled = localStorage.getItem(CHAT_NOTIFY_ENABLED_KEY) !== 'false';
 let messages = [...demoMessages];
 let pollTimer;
 let noticeTimer;
@@ -94,6 +95,8 @@ let titleTimer;
 let apiAvailable = true;
 let hasLoadedFromServer = false;
 let audioContext;
+let dragState = null;
+let suppressOpenClick = false;
 
 if (!clientId) {
   clientId = crypto.randomUUID ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -111,17 +114,10 @@ function applyChatSide(side) {
   widget.classList.toggle('is-left', chatSide === 'left');
   widget.classList.toggle('is-right', chatSide !== 'left');
 
-  if (sideButton) {
-    const moveTo = chatSide === 'left' ? 'правую' : 'левую';
-    sideButton.setAttribute('aria-label', `Переместить чат на ${moveTo} сторону`);
-    sideButton.title = `Переместить чат на ${moveTo} сторону`;
-    sideButton.textContent = chatSide === 'left' ? '→' : '←';
-  }
 }
 
-function toggleChatSide() {
-  applyChatSide(chatSide === 'left' ? 'right' : 'left');
-  showNotice(chatSide === 'left' ? 'Поддержка перемещена влево' : 'Поддержка перемещена вправо');
+function applyChatSideFromPointer(clientX) {
+  applyChatSide(clientX < window.innerWidth / 2 ? 'left' : 'right');
 }
 
 function managerMessages(list = messages) {
@@ -177,6 +173,17 @@ function showNotice(text) {
   }, 4200);
 }
 
+function unlockAudio() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    audioContext ||= new AudioContext();
+    if (audioContext.state === 'suspended') audioContext.resume();
+  } catch {
+    // Браузер может разрешить звук только после действия пользователя.
+  }
+}
+
 function playNotifySound() {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -184,25 +191,41 @@ function playNotifySound() {
     audioContext ||= new AudioContext();
     if (audioContext.state === 'suspended') audioContext.resume();
 
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(740, audioContext.currentTime);
-    oscillator.frequency.setValueAtTime(920, audioContext.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.05, audioContext.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.22);
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.24);
+    const now = audioContext.currentTime;
+    const notes = [
+      { at: 0.00, freq: 520, duration: 0.30 },
+      { at: 0.34, freq: 720, duration: 0.34 },
+      { at: 0.74, freq: 920, duration: 0.36 },
+      { at: 1.16, freq: 720, duration: 0.36 },
+      { at: 1.58, freq: 1040, duration: 0.42 },
+    ];
+
+    notes.forEach((note) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const startAt = now + note.at;
+      const endAt = startAt + note.duration;
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(note.freq, startAt);
+      oscillator.frequency.exponentialRampToValueAtTime(note.freq * 1.06, endAt);
+
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.07, startAt + 0.045);
+      gain.gain.exponentialRampToValueAtTime(0.0001, endAt);
+
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(endAt + 0.03);
+    });
   } catch {
     // Звук может быть заблокирован браузером до действия пользователя.
   }
 }
 
 function browserNotify(title, body) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
   try {
     new Notification(title, { body, tag: 'miracle-boost-chat-reply', icon: '/public/favicon.svg' });
   } catch {
@@ -221,28 +244,37 @@ function startTitleBlink(count) {
 }
 
 function notifyManagerReply(message, unreadCount) {
-  const preview = String(message.text || 'Новое сообщение').slice(0, 90);
+  const preview = String(message.text || 'Новое сообщение').slice(0, 140);
+  setUnread(unreadCount);
+  startTitleBlink(unreadCount);
+
+  if (!notificationsEnabled) return;
+
+  // Показываем уведомление и звук независимо от того, открыт чат или закрыт.
   showNotice(`Поддержка ответила: ${preview}`);
   playNotifySound();
   browserNotify('Поддержка Miracle Boost ответила', preview);
-  setUnread(unreadCount);
-  startTitleBlink(unreadCount);
 }
 
 function updateNotificationButton() {
   if (!notifyButton) return;
-  if (!('Notification' in window)) {
-    notifyButton.hidden = true;
+  const permission = 'Notification' in window ? Notification.permission : 'unsupported';
+  notifyButton.dataset.state = notificationsEnabled ? 'enabled' : 'disabled';
+  notifyButton.dataset.permission = permission;
+  notifyButton.setAttribute('aria-pressed', String(notificationsEnabled));
+
+  if (!notificationsEnabled) {
+    notifyButton.title = 'Включить уведомления поддержки';
+    notifyButton.setAttribute('aria-label', 'Включить уведомления поддержки');
+    notifyButton.textContent = '🔕';
     return;
   }
-  const permission = Notification.permission;
-  notifyButton.dataset.state = permission;
-  notifyButton.title = permission === 'granted'
-    ? 'Уведомления включены'
-    : permission === 'denied'
-      ? 'Уведомления заблокированы в браузере'
-      : 'Включить уведомления о новых ответах';
-  notifyButton.textContent = permission === 'granted' ? '🔔' : '🔕';
+
+  notifyButton.textContent = '🔔';
+  notifyButton.title = permission === 'denied'
+    ? 'Уведомления на сайте включены, но браузерные уведомления заблокированы'
+    : 'Выключить уведомления поддержки';
+  notifyButton.setAttribute('aria-label', 'Выключить уведомления поддержки');
 }
 
 function renderMessages(nextMessages = messages) {
@@ -307,7 +339,7 @@ function handleIncomingMessages(nextMessages) {
     localStorage.setItem(CHAT_LAST_NOTIFIED_MANAGER_KEY, lastNotifiedManagerId);
   }
 
-  const unreadBeforeRender = countUnread(nextMessages);
+  const unreadBeforeMark = countUnread(nextMessages);
   const hasNewManagerReply = hasLoadedFromServer && latestManager.id !== lastNotifiedManagerId;
 
   renderMessages(nextMessages);
@@ -315,11 +347,12 @@ function handleIncomingMessages(nextMessages) {
   if (hasNewManagerReply) {
     lastNotifiedManagerId = latestManager.id;
     localStorage.setItem(CHAT_LAST_NOTIFIED_MANAGER_KEY, lastNotifiedManagerId);
-    notifyManagerReply(latestManager, isOpen ? 0 : unreadBeforeRender);
+    // Уведомление срабатывает даже когда окно чата уже открыто.
+    notifyManagerReply(latestManager, Math.max(1, unreadBeforeMark));
   }
 
   if (isOpen) markManagerMessagesAsSeen(nextMessages);
-  else setUnread(unreadBeforeRender);
+  else setUnread(unreadBeforeMark);
 
   hasLoadedFromServer = true;
 }
@@ -397,39 +430,106 @@ async function sendMessage() {
 }
 
 function openChat() {
+  if (suppressOpenClick) return;
   widget.classList.add('is-open');
   panel.setAttribute('aria-hidden', 'false');
   input.focus();
   loadMessages().then(() => markManagerMessagesAsSeen()).catch(() => {});
-  clearInterval(pollTimer);
-  pollTimer = setInterval(() => {
-    if (apiAvailable) loadMessages();
-  }, POLL_INTERVAL);
 }
 
 function closeChat() {
   widget.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
+}
+
+function startPolling() {
   clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    loadMessages();
+  }, POLL_INTERVAL);
 }
 
 async function requestNotifications() {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'default') {
-    const result = await Notification.requestPermission();
+  notificationsEnabled = !notificationsEnabled;
+  localStorage.setItem(CHAT_NOTIFY_ENABLED_KEY, notificationsEnabled ? 'true' : 'false');
+
+  if (notificationsEnabled) {
+    unlockAudio();
+    if ('Notification' in window && Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        // Браузер может не показать запрос разрешения.
+      }
+    }
     updateNotificationButton();
-    showNotice(result === 'granted' ? 'Уведомления включены' : 'Уведомления не включены');
+    showNotice('Уведомления поддержки включены');
+    playNotifySound();
   } else {
     updateNotificationButton();
-    showNotice(Notification.permission === 'granted' ? 'Уведомления уже включены' : 'Уведомления заблокированы в браузере');
+    showNotice('Уведомления поддержки выключены');
   }
 }
 
+function startChatDrag(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  if (event.currentTarget === panelTop && event.target.closest('button, input, textarea, select, a')) return;
+
+  dragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+  };
+
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+}
+
+function moveChatDrag(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+
+  const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+  if (distance < 9 && !dragState.active) return;
+
+  dragState.active = true;
+  suppressOpenClick = true;
+  widget.classList.add('is-dragging');
+  applyChatSideFromPointer(event.clientX);
+  event.preventDefault();
+}
+
+function endChatDrag(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+  const wasDragging = dragState.active;
+
+  dragState = null;
+  widget.classList.remove('is-dragging');
+
+  if (wasDragging) {
+    showNotice(chatSide === 'left' ? 'Чат закреплён слева' : 'Чат закреплён справа');
+    setTimeout(() => {
+      suppressOpenClick = false;
+    }, 120);
+  } else {
+    suppressOpenClick = false;
+  }
+}
+
+function setupChatDrag() {
+  [openButton, panelTop].filter(Boolean).forEach((handle) => {
+    handle.addEventListener('pointerdown', startChatDrag);
+    handle.addEventListener('pointermove', moveChatDrag);
+    handle.addEventListener('pointerup', endChatDrag);
+    handle.addEventListener('pointercancel', endChatDrag);
+  });
+}
+
+document.addEventListener('pointerdown', unlockAudio, { once: true });
+document.addEventListener('keydown', unlockAudio, { once: true });
 openButton.addEventListener('click', openChat);
 closeButton.addEventListener('click', closeChat);
 sendButton.addEventListener('click', sendMessage);
 notifyButton?.addEventListener('click', requestNotifications);
-sideButton?.addEventListener('click', toggleChatSide);
 nameInput?.addEventListener('input', () => { saveName(); syncNameState(); });
 input.addEventListener('input', () => {
   input.style.height = 'auto';
@@ -449,5 +549,7 @@ document.addEventListener('visibilitychange', () => {
 applyChatSide(chatSide);
 syncNameState();
 updateNotificationButton();
+setupChatDrag();
 renderMessages();
 loadMessages();
+startPolling();

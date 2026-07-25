@@ -534,3 +534,36 @@ html,
   .admin-toast { right: 14px; bottom: 14px; }
 }
 .conversation { grid-template-columns: 42px 1fr auto auto; }
+
+
+/* final admin notification/chat overflow fixes */
+.conversation,
+.conversation span,
+.conversation strong,
+.conversation small,
+.conversation time,
+.admin-message,
+.admin-message p,
+.order-detail,
+.order-detail__grid strong,
+.order-detail__list dd,
+.order-detail__comment p,
+.admin-toast,
+.chat-admin__reply textarea {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.admin-message p,
+.order-detail__comment p {
+  white-space: pre-wrap;
+}
+.admin-notify-toggle[data-enabled="false"] {
+  background: #4b5563;
+  opacity: .92;
+}
+:root[data-theme="dark"] .admin-notify-toggle[data-enabled="false"] {
+  color: #fff;
+  background: #3a4656;
+}

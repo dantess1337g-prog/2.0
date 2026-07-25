@@ -328,15 +328,7 @@ async function handleCreateOrder(event) {
     [order.id, order.number, order.status, order.telegram, order.email, order.comment, JSON.stringify(order.calculation), order.isPriority, now],
   );
 
-  await query(
-    'INSERT INTO public.conversations(id, name, created_at, updated_at) VALUES($1, $2, $3, $3)',
-    [`order-${id}`, `Заказ ${order.number}`, now],
-  );
-  await query(
-    `INSERT INTO public.messages(id, conversation_id, role, author, text, created_at)
-     VALUES($1, $2, 'client', 'Заявка с сайта', $3, $4)`,
-    [crypto.randomUUID(), `order-${id}`, orderText(order), now],
-  );
+  // Заказы показываются только во вкладке «Заказы», не в списке чатов.
 
   return json(201, { order: normalizeOrder(order) });
 }
@@ -448,6 +440,7 @@ async function handleAdminConversations(event) {
       FROM public.messages
       WHERE conversation_id = c.id
     ) stats ON true
+    WHERE c.id NOT LIKE 'order-%'
     ORDER BY c.updated_at DESC
   `);
 

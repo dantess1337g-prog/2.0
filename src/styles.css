@@ -1810,9 +1810,13 @@ body::after {
   font-size: .95rem;
   cursor: pointer;
 }
-.chat-panel__notify[data-state="granted"] {
+.chat-panel__notify[data-state="enabled"] {
   color: var(--white);
   background: #35c76d;
+}
+.chat-panel__notify[data-state="disabled"] {
+  color: var(--charcoal-dark);
+  background: rgba(255,255,255,.78);
 }
 :root[data-theme="dark"] .chat-widget__notice {
   color: #f7fbff;
@@ -1827,7 +1831,7 @@ body::after {
   .chat-widget__launcher.has-unread { animation: none !important; }
 }
 
-/* support widget side switch */
+/* support widget drag-to-side */
 .chat-widget.is-left {
   left: 24px;
   right: auto;
@@ -1841,31 +1845,24 @@ body::after {
   left: 0;
   right: auto;
 }
-.chat-panel__side {
-  position: absolute;
-  right: 90px;
-  top: 18px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 50%;
-  color: var(--charcoal-dark);
-  background: rgba(255,255,255,.9);
-  font-size: 1rem;
-  font-weight: 950;
-  cursor: pointer;
+.chat-widget.is-dragging,
+.chat-widget.is-dragging * {
+  user-select: none;
 }
-.chat-panel__side:hover,
+.chat-widget.is-dragging .chat-widget__launcher,
+.chat-widget.is-dragging .chat-panel__top {
+  cursor: grabbing;
+}
+.chat-widget__launcher,
+.chat-panel__top {
+  touch-action: none;
+}
+.chat-panel__top {
+  cursor: grab;
+}
 .chat-panel__notify:hover,
 .chat-panel__close:hover {
   transform: translateY(-1px);
-}
-:root[data-theme="dark"] .chat-panel__side {
-  color: #0f1520;
-  background: rgba(255,255,255,.92);
 }
 .field__control.is-invalid {
   border-color: var(--burgundy) !important;
@@ -1888,7 +1885,30 @@ body::after {
     left: 0;
     right: auto;
   }
-  .chat-panel__side {
-    right: 88px;
-  }
+}
+
+
+/* final notification/drag/chat overflow fixes */
+.chat-panel__top::after,
+.chat-panel__top::before { pointer-events: none; }
+.chat-panel__manager,
+.chat-panel__manager div,
+.chat-panel__manager strong,
+.chat-panel__manager small,
+.chat-message,
+.chat-message p,
+.chat-widget__notice,
+.chat-panel__status,
+.chat-panel__form textarea {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.chat-message p {
+  white-space: pre-wrap;
+}
+.chat-panel__notify[data-state="disabled"] {
+  opacity: .78;
+  filter: grayscale(.2);
 }
