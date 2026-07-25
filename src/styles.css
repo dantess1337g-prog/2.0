@@ -2038,3 +2038,21 @@ body::after {
 }
 :root[data-theme="dark"] .chat-panel__closed p { color: #c4cfdd; }
 :root[data-theme="dark"] .chat-panel__closed strong { color: #fff; }
+
+/* Boundary fix: support widget stays inside the visible site area. */
+.chat-widget.is-free-position {
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+}
+.chat-widget.is-free-position .chat-widget__notice {
+  left: auto !important;
+  right: 0 !important;
+  max-width: min(330px, calc(100vw - 32px));
+}
+@media (max-width: 620px) {
+  .chat-widget.is-free-position .chat-widget__notice {
+    left: auto !important;
+    right: 0 !important;
+    width: min(330px, calc(100vw - 20px));
+  }
+}

@@ -129,7 +129,14 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function panelSize() {
+function viewportSize() {
+  return {
+    width: Math.max(320, document.documentElement.clientWidth || window.innerWidth || 320),
+    height: Math.max(360, window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 360),
+  };
+}
+
+function launcherSize() {
   const rect = openButton.getBoundingClientRect();
   return {
     width: Math.max(58, rect.width || openButton.offsetWidth || 58),
@@ -137,12 +144,29 @@ function panelSize() {
   };
 }
 
-function defaultChatPosition() {
-  const width = 170;
-  const height = 56;
+function panelSize() {
+  const rect = panel.getBoundingClientRect();
   return {
-    x: Math.max(14, window.innerWidth - width - 24),
-    y: Math.max(14, window.innerHeight - height - 24),
+    width: Math.max(280, rect.width || panel.offsetWidth || Math.min(380, viewportSize().width - 32)),
+    height: Math.max(360, rect.height || panel.offsetHeight || Math.min(610, viewportSize().height - 32)),
+  };
+}
+
+function noticeSize() {
+  if (!noticeEl || noticeEl.hidden) return { width: 0, height: 0 };
+  const rect = noticeEl.getBoundingClientRect();
+  return {
+    width: Math.max(0, rect.width || noticeEl.offsetWidth || 0),
+    height: Math.max(0, rect.height || noticeEl.offsetHeight || 0),
+  };
+}
+
+function defaultChatPosition() {
+  const size = launcherSize();
+  const viewport = viewportSize();
+  return {
+    x: Math.max(14, viewport.width - size.width - 24),
+    y: Math.max(14, viewport.height - size.height - 24),
   };
 }
 
@@ -156,12 +180,48 @@ function loadChatPosition() {
   return defaultChatPosition();
 }
 
+function chatPositionBounds() {
+  const viewport = viewportSize();
+  const launcher = launcherSize();
+  const margin = viewport.width <= 620 ? 10 : 16;
+
+  let minX = margin;
+  let minY = margin;
+  let maxX = viewport.width - launcher.width - margin;
+  let maxY = viewport.height - launcher.height - margin;
+
+  if (widget.classList.contains('is-open')) {
+    const size = panelSize();
+    minX = size.width - launcher.width + margin;
+    minY = size.height - launcher.height + margin;
+  } else {
+    const notice = noticeSize();
+    if (notice.width && notice.height) {
+      minX = Math.max(minX, notice.width - launcher.width + margin);
+      minY = Math.max(minY, notice.height + 72 - launcher.height + margin);
+    }
+  }
+
+  if (maxX < minX) {
+    const centerX = Math.max(margin, (viewport.width - launcher.width) / 2);
+    minX = centerX;
+    maxX = centerX;
+  }
+
+  if (maxY < minY) {
+    const bottomY = Math.max(margin, viewport.height - launcher.height - margin);
+    minY = bottomY;
+    maxY = bottomY;
+  }
+
+  return { minX, minY, maxX, maxY };
+}
+
 function applyChatPosition(position = chatPosition, shouldSave = true) {
-  const size = panelSize();
-  const margin = window.innerWidth <= 620 ? 10 : 16;
+  const bounds = chatPositionBounds();
   chatPosition = {
-    x: clamp(Number(position.x || 0), margin, Math.max(margin, window.innerWidth - size.width - margin)),
-    y: clamp(Number(position.y || 0), margin, Math.max(margin, window.innerHeight - size.height - margin)),
+    x: clamp(Number(position.x || 0), bounds.minX, bounds.maxX),
+    y: clamp(Number(position.y || 0), bounds.minY, bounds.maxY),
   };
 
   widget.style.left = `${Math.round(chatPosition.x)}px`;
@@ -249,6 +309,7 @@ function showNotice(text) {
   noticeEl.textContent = text;
   noticeEl.hidden = false;
   noticeEl.classList.add('is-visible');
+  requestAnimationFrame(() => applyChatPosition(chatPosition));
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => {
     noticeEl.classList.remove('is-visible');
